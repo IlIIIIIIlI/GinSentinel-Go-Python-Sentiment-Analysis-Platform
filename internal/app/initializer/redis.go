@@ -1,28 +1,34 @@
 package initializer
 
 import (
-	"gin-pathway/internal/app/config"
+	"context"
+	"fmt"
 	"github.com/go-redis/redis/v8"
-	log "github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus"
+
+	"sentiment-service/internal/app/config"
 )
 
-var RedisClient *redis.Client
+// Redis 全局Redis客户端
+var Redis *redis.Client
 
-// InitializeRedis 初始化Redis
+// InitializeRedis 初始化Redis连接
 func InitializeRedis() error {
 	// 创建Redis客户端
-	RedisClient = redis.NewClient(&redis.Options{
-		Addr:     config.Conf.Redis.Addr,
+	addr := fmt.Sprintf("%s:%d", config.Conf.Redis.Host, config.Conf.Redis.Port)
+	Redis = redis.NewClient(&redis.Options{
+		Addr:     addr,
 		Password: config.Conf.Redis.Password,
-		DB:       config.Conf.Redis.Db,
+		DB:       config.Conf.Redis.DB, // 注意这里使用大写的DB
 	})
 
-	// 测试Redis连接
-	_, err := RedisClient.Ping(RedisClient.Context()).Result()
+	// 测试连接
+	ctx := context.Background()
+	_, err := Redis.Ping(ctx).Result()
 	if err != nil {
-		log.Error("redis初始化失败: %v", err)
-		return err
+		return fmt.Errorf("Redis连接测试失败: %v", err)
 	}
 
+	logrus.Info("Redis初始化完成")
 	return nil
 }

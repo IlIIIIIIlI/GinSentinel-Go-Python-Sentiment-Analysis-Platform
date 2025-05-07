@@ -1,0 +1,112 @@
+version: '3'
+
+services:
+  sentiment-api:
+    build: .
+    ports:
+      - "9001:9001"
+    depends_on:
+#      - postgres
+      - rabbitmq
+      - sentiment-algorithm
+      - redis
+    environment:
+      - DB_HOST=host.docker.internal
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_NAME=postgres
+      - ALGORITHM_ENDPOINT=sentiment-algorithm:50051
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+    volumes:
+      - ./logs:/app/logs
+      - ./configs:/app/configs
+    networks:
+      - sentiment-network
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9001/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  redis:
+    image: redis:latest
+    ports:
+      - "6379:6379"
+    networks:
+      - sentiment-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  sentiment-algorithm:
+    build:
+      context: .
+      dockerfile: python-service/Dockerfile
+    ports:
+      - "50051:50051"
+    environment:
+      - GRPC_PORT=50051
+      - PYTHONPATH=/app:/app/python-service/gen
+    volumes:
+      - ./python-service:/app/python-service
+    networks:
+      - sentiment-network
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "test", "-f", "/app/python-service/server.py"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+#  postgres:
+#    image: postgres:13
+#    ports:
+#      - "5432:5432"
+#    environment:
+#      - POSTGRES_PASSWORD=password
+#      - POSTGRES_USER=user
+#      - POSTGRES_DB=sentiment
+#    volumes:
+#      - pgdata:/var/lib/postgresql/data
+#    networks:
+#      - sentiment-network
+#    restart: on-failure
+#    healthcheck:
+#      test: ["CMD-SHELL", "pg_isready -U user -d sentiment"]
+#      interval: 10s
+#      timeout: 5s
+#      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    hostname: rabbitmq
+    container_name: sentiment-rabbitmq
+    ports:
+      - "15672:15672"  # 管理界面
+      - "5672:5672"    # AMQP端口
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+      - RABBITMQ_DEFAULT_VHOST=/
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - sentiment-network
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "rabbitmqctl", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+networks:
+  sentiment-network:
+    driver: bridge
+
+volumes:
+  pgdata:
+  rabbitmq_data:

@@ -1,7 +1,7 @@
 package controllers
 
 import (
-	"gin-pathway/internal/services"
+	"sentiment-service/internal/services"
 	"github.com/gin-gonic/gin"
 	"net/http"
 )

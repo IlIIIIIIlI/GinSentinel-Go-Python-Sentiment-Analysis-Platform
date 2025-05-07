@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package sentiment.v1;
+
+option go_package = "sentiment-service/internal/gen/api/sentiment/v1;sentimentv1";
+
+// 情感分析服务
+service SentimentAnalyzer {
+  // 分析单个文本
+  rpc AnalyzeSentiment(SentimentRequest) returns (SentimentResponse) {}
+
+  // 流式批量分析
+  rpc BatchAnalyzeSentiment(stream SentimentRequest) returns (stream SentimentResponse) {}
+}
+
+// 情感分析请求
+message SentimentRequest {
+  string text = 1;
+  string language = 2;
+  string request_id = 3;
+}
+
+// 情感分析响应
+message SentimentResponse {
+  string request_id = 1;
+  string sentiment = 2;
+  double score = 3;
+  map<string, double> confidence_scores = 4;
+  repeated string keywords = 5;
+}

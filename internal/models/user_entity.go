@@ -13,5 +13,5 @@ type User struct {
 
 // TableName 方法用于返回表名
 func (u User) TableName() string {
-	return "user"
+	return "users" // PostgreSQL 通常使用复数形式的表名
 }

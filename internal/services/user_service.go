@@ -1,8 +1,8 @@
 package services
 
 import (
-	"gin-pathway/internal/models"
-	"gin-pathway/internal/repositories"
+	"sentiment-service/internal/models"
+	"sentiment-service/internal/repositories"
 	"github.com/go-xorm/xorm"
 )
 

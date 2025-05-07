@@ -1,0 +1,195 @@
+import pika
+import json
+import time
+import asyncio
+import logging
+import os
+import signal
+import sys
+
+# Import the sentiment model
+from sentiment_model import analyze_text
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Get RabbitMQ configuration from environment variables
+RABBITMQ_URL = os.environ.get('RABBITMQ_URL', 'amqp://guest:guest@localhost:5672/')
+TASK_QUEUE = os.environ.get('TASK_QUEUE', 'sentiment_tasks')
+RESULT_QUEUE = os.environ.get('RESULT_QUEUE', 'sentiment_results')
+
+# Global connection and channel variables
+connection = None
+channel = None
+
+def setup_rabbitmq():
+    """Setup RabbitMQ connection and declare queues."""
+    global connection, channel
+
+    try:
+        logger.info(f"Connecting to RabbitMQ at {RABBITMQ_URL}")
+        connection_params = pika.URLParameters(RABBITMQ_URL)
+        connection = pika.BlockingConnection(connection_params)
+        channel = connection.channel()
+
+        # Declare queues with durability to survive broker restarts
+        channel.queue_declare(queue=TASK_QUEUE, durable=True)
+        channel.queue_declare(queue=RESULT_QUEUE, durable=True)
+
+        # Set QoS to avoid overwhelming the worker
+        channel.basic_qos(prefetch_count=1)
+
+        logger.info("RabbitMQ connection and queues ready")
+        return True
+    except Exception as e:
+        logger.error(f"Error setting up RabbitMQ: {e}")
+        return False
+
+async def process_message(body):
+    """
+    Process the message from RabbitMQ.
+    This is an async function that will analyze the sentiment of the text.
+    """
+    try:
+        # Parse the message body as JSON
+        data = json.loads(body)
+        text = data.get('text', '')
+        language = data.get('language', 'en')
+        request_id = data.get('request_id', '')
+
+        if not text or not request_id:
+            logger.error("Message missing required fields (text or request_id)")
+            return False
+
+        logger.info(f"Processing task: {request_id} (text length: {len(text)})")
+
+        # Record start time for performance tracking
+        start_time = time.time()
+
+        # Call the sentiment analysis model
+        result = await analyze_text(text, language)
+
+        # Calculate processing duration
+        duration = time.time() - start_time
+
+        # Build the response
+        response = {
+            'request_id': request_id,
+            'text': text[:100] + ('...' if len(text) > 100 else ''),  # Truncate long texts
+            'sentiment': result['sentiment'],
+            'score': result['score'],
+            'confidence_scores': result['confidence_scores'],
+            'keywords': result['keywords'],
+            'duration': duration,
+            'processed_at': time.time()
+        }
+
+        # Publish the result
+        channel.basic_publish(
+            exchange='',
+            routing_key=RESULT_QUEUE,
+            body=json.dumps(response),
+            properties=pika.BasicProperties(
+                delivery_mode=2,  # Persistent message
+                content_type='application/json'
+            )
+        )
+
+        logger.info(f"Completed task: {request_id} in {duration:.2f}s")
+        return True
+    except json.JSONDecodeError:
+        logger.error("Failed to decode message as JSON")
+        return False
+    except Exception as e:
+        logger.error(f"Error processing message: {e}")
+        return False
+
+def callback(ch, method, properties, body):
+    """Callback function for message consumption."""
+    logger.info(f"Received message: {body[:50]}...")
+
+    # Run the async processing in the event loop
+    loop = asyncio.get_event_loop()
+    success = loop.run_until_complete(process_message(body))
+
+    if success:
+        # Acknowledge the message to remove it from the queue
+        ch.basic_ack(delivery_tag=method.delivery_tag)
+        logger.info("Message acknowledged (processed successfully)")
+    else:
+        # Reject the message and requeue it if the processing failed
+        ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+        logger.warning("Message rejected (processing failed, requeued)")
+
+def start_consuming():
+    """Start consuming messages from the task queue."""
+    try:
+        logger.info(f"Starting to consume messages from queue: {TASK_QUEUE}")
+        channel.basic_consume(
+            queue=TASK_QUEUE,
+            on_message_callback=callback
+        )
+
+        # Start consuming messages
+        logger.info("Waiting for messages. To exit press CTRL+C")
+        channel.start_consuming()
+    except KeyboardInterrupt:
+        logger.info("Interrupted by user, shutting down")
+        shutdown()
+    except Exception as e:
+        logger.error(f"Error during message consumption: {e}")
+        shutdown()
+
+def shutdown(signum=None, frame=None):
+    """Clean shutdown of the worker."""
+    logger.info("Shutting down worker")
+
+    # Stop consuming messages
+    if channel is not None and channel.is_open:
+        try:
+            channel.stop_consuming()
+            logger.info("Stopped consuming messages")
+        except Exception as e:
+            logger.error(f"Error stopping consumption: {e}")
+
+    # Close the connection
+    if connection is not None and connection.is_open:
+        try:
+            connection.close()
+            logger.info("Closed RabbitMQ connection")
+        except Exception as e:
+            logger.error(f"Error closing connection: {e}")
+
+    # Exit
+    logger.info("Worker shutdown complete")
+    sys.exit(0)
+
+def main():
+    """Main entry point for the worker."""
+    # Setup signal handlers for graceful shutdown
+    signal.signal(signal.SIGTERM, shutdown)
+    signal.signal(signal.SIGINT, shutdown)
+
+    # Try to connect to RabbitMQ, with retries
+    max_retries = 5
+    retry_delay = 5  # seconds
+
+    for attempt in range(max_retries):
+        if setup_rabbitmq():
+            # Start consuming messages
+            start_consuming()
+            break
+        else:
+            if attempt < max_retries - 1:
+                logger.info(f"Retrying in {retry_delay} seconds (attempt {attempt+1}/{max_retries})")
+                time.sleep(retry_delay)
+            else:
+                logger.error(f"Failed to connect to RabbitMQ after {max_retries} attempts")
+                sys.exit(1)
+
+if __name__ == "__main__":
+    main()

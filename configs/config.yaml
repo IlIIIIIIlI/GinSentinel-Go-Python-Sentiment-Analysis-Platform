@@ -1,0 +1,59 @@
+# 情感分析服务配置文件
+
+# 应用基础配置
+app:
+  # 运行模式（dev 或 prod）
+  mode: dev
+  # 服务监听地址
+  addr: 0.0.0.0
+  # 服务监听端口
+  port: 9001
+
+# 数据库配置
+database:
+  # 数据库驱动
+  driver: postgres
+  # 数据库主机
+  host: localhost  # Change from localhost to the Docker service name
+  # 数据库端口
+  port: 5432
+  # 数据库用户名
+  user: postgres
+  # 数据库密码
+  password: postgres
+  # 数据库名称 - 确保此数据库存在
+  dbname: postgres
+  # SSL 模式
+  sslmode: disable
+  # 时区
+  timezone: UTC
+
+# 算法服务配置
+algorithm:
+  # 算法服务端点
+  endpoint: sentiment-algorithm:50051
+
+# Redis配置
+redis:
+  # Redis主机
+  host: redis
+  # Redis端口
+  port: 6379
+  # Redis密码（如果有）
+  password: ""
+  # Redis数据库
+  db: 0
+
+# 日志配置
+log:
+  # 日志格式（json 或 text）
+  format: json
+  # 日志级别（debug, info, warn, error, fatal, panic）
+  level: debug
+  # 是否报告调用者信息
+  reportCaller: true
+
+rabbitmq:
+  url: amqp://guest:guest@localhost:5672/
+  task_queue: sentiment_tasks
+  result_queue: sentiment_results
